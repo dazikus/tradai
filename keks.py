@@ -289,9 +289,14 @@ class SofaScoreProvider:
     def _normalize_team_name(self, team_name: str) -> str:
         """Normalize team name for matching"""
         name = team_name.lower()
+        
+        # Replace hyphens with spaces for consistent matching
+        name = name.replace('-', ' ')
+        
         # Remove common suffixes and prefixes
-        for term in [' fc', ' f.c.', ' united', ' city', ' sporting', ' club', ' cf', ' sc']:
+        for term in [' fc', ' f.c.', ' united', ' city', ' sporting', ' club', ' cf', ' sc', ' saudi']:
             name = name.replace(term, '')
+        
         # Remove extra whitespace
         name = ' '.join(name.split())
         return name.strip()
@@ -412,13 +417,14 @@ class SofaScoreProvider:
         except ValueError as e:
             raise Exception(f"SofaScore returned invalid JSON: {str(e)}")
     
-    def get_live_game_data(self, home_team: str, away_team: str) -> Optional[LiveGameData]:
+    def get_live_game_data(self, home_team: str, away_team: str, debug: bool = False) -> Optional[LiveGameData]:
         """
         Fetch live game data for a specific matchup.
         
         Args:
             home_team: Home team name from Polymarket
             away_team: Away team name from Polymarket
+            debug: If True, print debugging information
             
         Returns:
             LiveGameData if match found and live, None if not found
@@ -437,14 +443,30 @@ class SofaScoreProvider:
         # Fetch all live matches (will raise exception if API fails)
         live_matches = self._fetch_all_live_matches()
         
+        if debug:
+            print(f"\n  [DEBUG] Looking for: '{home_team}' vs '{away_team}'")
+            print(f"  [DEBUG] Normalized: '{self._normalize_team_name(home_team)}' vs '{self._normalize_team_name(away_team)}'")
+            print(f"  [DEBUG] Found {len(live_matches)} live matches in SofaScore")
+        
         # Find matching match
         for match in live_matches:
             api_home = match.get('homeTeam', {}).get('name', '')
             api_away = match.get('awayTeam', {}).get('name', '')
             
+            if debug:
+                home_match = self._teams_match(home_team, api_home)
+                away_match = self._teams_match(away_team, api_away)
+                if home_match or away_match:
+                    print(f"  [DEBUG] Comparing with: '{api_home}' vs '{api_away}'")
+                    print(f"  [DEBUG]   Normalized: '{self._normalize_team_name(api_home)}' vs '{self._normalize_team_name(api_away)}'")
+                    print(f"  [DEBUG]   Home match: {home_match}, Away match: {away_match}")
+            
             # Check if teams match (fuzzy)
             if (self._teams_match(home_team, api_home) and 
                 self._teams_match(away_team, api_away)):
+                
+                if debug:
+                    print(f"  [DEBUG] ✅ MATCH FOUND!")
                 
                 # Extract score data
                 home_score_data = match.get('homeScore', {})
@@ -477,6 +499,8 @@ class SofaScoreProvider:
                 return game_data
         
         # No match found (not an error - game might not be live on SofaScore)
+        if debug:
+            print(f"  [DEBUG] ❌ No match found")
         return None
 
 
@@ -857,13 +881,17 @@ class LiveSportsTracker:
         
         if not home_team or not away_team:
             # Can't verify with SofaScore without team names - skip
+            print(f"  ⚠️  Skipped: {event['title']} (couldn't parse team names)")
             return False
+        
+        # Show which game we're checking
+        print(f"  🔍 Checking: {home_team} vs {away_team}", end=" ... ")
         
         # Check SofaScore for live game data - this is the ONLY source of truth
         live_data = None
         if self.score_provider:
             try:
-                live_data = self.score_provider.get_live_game_data(home_team, away_team)
+                live_data = self.score_provider.get_live_game_data(home_team, away_team, debug=False)
             except Exception as e:
                 print("\n" + "="*80)
                 print("❌ FATAL ERROR: SofaScore API Failed During Operation")
@@ -876,8 +904,10 @@ class LiveSportsTracker:
         
         # If game is not in SofaScore's live feed, it's not live - skip it
         if not live_data:
-            # Don't show anything - game is not live according to SofaScore
+            print("❌ Not found in SofaScore (not live)")
             return False
+        
+        print("✅ Found in SofaScore")
         
         # Check if game status indicates it's finished
         if live_data.status:
