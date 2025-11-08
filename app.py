@@ -5,7 +5,7 @@ Flask REST API for live sports betting tracker with JWT auth and caching
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import random
 import os
 
@@ -61,8 +61,8 @@ def fetch_and_cache_data():
         # Schedule next refresh with random interval
         next_interval = random.randint(Config.MIN_REFRESH_INTERVAL, Config.MAX_REFRESH_INTERVAL)
         print(f"Next refresh in {next_interval} seconds")
-        scheduler.add_job(fetch_and_cache_data, 'date', 
-                         run_date=datetime.now(timezone.utc).timestamp() + next_interval)
+        next_run_time = datetime.now(timezone.utc) + timedelta(seconds=next_interval)
+        scheduler.add_job(fetch_and_cache_data, 'date', run_date=next_run_time)
 
 
 # Start scheduler and initial fetch
