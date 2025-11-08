@@ -20,9 +20,8 @@ class LiveSportsTracker:
         self.sports = sports
         self.score_provider = score_provider
         
-        # Check if live scores are enabled and working
-        if self.score_provider:
-            self.score_provider.check_health()
+        # Note: Health check removed from init to allow app to start even if SofaScore is temporarily unavailable
+        # The app will gracefully handle SofaScore errors during data fetching
     
     def get_live_events(self, sport: Sport) -> List[Dict]:
         """Get live events for a specific sport"""
@@ -49,7 +48,10 @@ class LiveSportsTracker:
             try:
                 live_data = self.score_provider.get_live_game_data(home_team, away_team)
             except Exception as e:
-                raise Exception(f"SofaScore API failed: {str(e)}")
+                # SofaScore error - log but don't crash
+                # Game might still be shown with Polymarket data only
+                print(f"[WARNING] SofaScore API error for {home_team} vs {away_team}: {e}")
+                return None  # Skip games we can't verify are live
         
         # If game is not in SofaScore's live feed, it's not live
         if not live_data:

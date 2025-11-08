@@ -55,7 +55,8 @@ def fetch_and_cache_data():
         print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Cache updated. Games: {data.get('total_games', 0)}")
         
     except Exception as e:
-        print(f"Error fetching data: {e}")
+        print(f"[ERROR] Failed to fetch data: {e}")
+        # Don't crash - just log and continue with empty cache
     finally:
         games_cache['is_fetching'] = False
         # Schedule next refresh with random interval
@@ -67,7 +68,12 @@ def fetch_and_cache_data():
 
 # Start scheduler and initial fetch
 scheduler.start()
-fetch_and_cache_data()  # Initial fetch
+
+# Initial fetch - non-blocking, errors logged but don't crash the app
+try:
+    fetch_and_cache_data()
+except Exception as e:
+    print(f"[WARNING] Initial data fetch failed (app will retry): {e}")
 
 
 @app.route('/api/login', methods=['POST'])
