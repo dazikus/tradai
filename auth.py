@@ -3,6 +3,7 @@ Authentication module for JWT-based auth
 """
 
 import jwt
+import bcrypt
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from flask import request, jsonify
@@ -60,6 +61,13 @@ def require_auth(f):
 
 
 def verify_credentials(username: str, password: str) -> bool:
-    """Verify username and password"""
-    return username == Config.ADMIN_USERNAME and password == Config.ADMIN_PASSWORD
+    """Verify username and password using bcrypt"""
+    if username != Config.ADMIN_USERNAME:
+        return False
+    
+    # Compare password with bcrypt hash
+    password_bytes = password.encode('utf-8')
+    hash_bytes = Config.ADMIN_PASSWORD_HASH.encode('utf-8')
+    
+    return bcrypt.checkpw(password_bytes, hash_bytes)
 

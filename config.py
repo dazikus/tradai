@@ -35,12 +35,12 @@ class Config:
     FLASK_DEBUG = False
     
     # Authentication
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'stom-ta-pe-ya-ben-zona')
     JWT_EXPIRY_DAYS = 7  # Token valid for 7 days
     
-    # Credentials (in production, use environment variables and proper hashing)
-    ADMIN_USERNAME = 'admin'
-    ADMIN_PASSWORD = 'admin'  # TODO: Hash this in production
+    # Credentials (bcrypt hashed)
+    ADMIN_USERNAME = 'homo'
+    ADMIN_PASSWORD_HASH = '$2b$12$Z3ARp00lxExYrB4etkB4werxfFAOt5i4FeFvT1CWMzWtFLFqKCsFW'  # bcrypt hash of password
     
     # Data refresh settings
     MIN_REFRESH_INTERVAL = 30  # seconds
