@@ -1,15 +1,20 @@
 """
-Flask REST API for live sports betting tracker
+Flask REST API for live sports betting tracker with JWT auth and caching
 """
 
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
+from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime, timezone
+import random
 import os
 
 from config import Config
 from services import SoccerSport, NHLSport, SofaScoreProvider, LiveSportsTracker
+from auth import generate_token, require_auth, verify_credentials
 
 app = Flask(__name__, static_folder='static')
+app.config['SECRET_KEY'] = Config.SECRET_KEY
 CORS(app)  # Enable CORS for all routes
 
 # Initialize services
@@ -21,110 +26,131 @@ sports = [
 score_provider = SofaScoreProvider()
 tracker = LiveSportsTracker(sports, score_provider)
 
+# In-memory cache for live games data
+games_cache = {
+    'data': None,
+    'last_updated': None,
+    'is_fetching': False
+}
+
+# Background scheduler for automatic data refresh
+scheduler = BackgroundScheduler()
+
+
+def fetch_and_cache_data():
+    """Background task to fetch and cache live games data"""
+    global games_cache
+    
+    if games_cache['is_fetching']:
+        return  # Skip if already fetching
+    
+    try:
+        games_cache['is_fetching'] = True
+        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Fetching live games data...")
+        
+        data = tracker.get_all_live_games()
+        games_cache['data'] = data
+        games_cache['last_updated'] = datetime.now(timezone.utc)
+        
+        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Cache updated. Games: {data.get('total_games', 0)}")
+        
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+    finally:
+        games_cache['is_fetching'] = False
+        # Schedule next refresh with random interval
+        next_interval = random.randint(Config.MIN_REFRESH_INTERVAL, Config.MAX_REFRESH_INTERVAL)
+        print(f"Next refresh in {next_interval} seconds")
+        scheduler.add_job(fetch_and_cache_data, 'date', 
+                         run_date=datetime.now(timezone.utc).timestamp() + next_interval)
+
+
+# Start scheduler and initial fetch
+scheduler.start()
+fetch_and_cache_data()  # Initial fetch
+
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    """
+    POST /api/login
+    
+    Authenticate user and return JWT token.
+    Request body: {"username": "admin", "password": "admin"}
+    """
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
+    
+    if verify_credentials(username, password):
+        token = generate_token(username)
+        return jsonify({
+            'token': token,
+            'username': username,
+            'expires_in_days': Config.JWT_EXPIRY_DAYS
+        }), 200
+    else:
+        return jsonify({'error': 'Invalid credentials'}), 401
+
 
 @app.route('/api/live-games', methods=['GET'])
+@require_auth
 def get_live_games():
     """
-    GET /api/live-games
+    GET /api/live-games (Protected)
     
-    Returns JSON with all currently live games, including:
-    - Event details (title, Polymarket link, start time)
-    - Team names
-    - Live score and game time from SofaScore
-    - Betting odds from Polymarket
-    - Game momentum, possession, and statistics
-    - Recent game events/commentary
-    
-    Response format:
-    {
-        "timestamp": "2025-11-08T15:30:00Z",
-        "total_games": 5,
-        "sports": {
-            "Soccer": {
-                "total_found": 10,
-                "total_live": 5,
-                "games": [
-                    {
-                        "event_id": "...",
-                        "event_slug": "...",
-                        "title": "Team A vs Team B",
-                        "polymarket_url": "https://polymarket.com/event/...",
-                        "start_time": "2025-11-08T15:00:00Z",
-                        "home_team": "Team A",
-                        "away_team": "Team B",
-                        "sport": "Soccer",
-                        "live_data": {
-                            "home_score": 1,
-                            "away_score": 0,
-                            "current_minute": 35,
-                            "status": "1st half",
-                            "momentum": {
-                                "possession_home": 55,
-                                "possession_away": 45,
-                                "attacks_home": 15,
-                                "attacks_away": 8,
-                                "dangerous_attacks_home": 5,
-                                "dangerous_attacks_away": 2,
-                                "momentum_direction": "home",
-                                "momentum_value": 25,
-                                "momentum_graph": [...],
-                                "recent_comments": [...]
-                            }
-                        },
-                        "moneyline": {
-                            "has_draw": true,
-                            "outcomes": [
-                                {"name": "Team A", "price": 0.45, "spread": 0.04},
-                                {"name": "Draw", "price": 0.30, "spread": 0.03},
-                                {"name": "Team B", "price": 0.25, "spread": 0.03}
-                            ]
-                        }
-                    }
-                ]
-            }
-        }
-    }
+    Returns cached live games data. Server refreshes data automatically 
+    every 30-60 seconds. Users read from cache, not triggering API calls.
     """
-    try:
-        data = tracker.get_all_live_games()
-        return jsonify(data), 200
-    except Exception as e:
+    if games_cache['data'] is None:
         return jsonify({
-            'error': 'Failed to fetch live games',
-            'message': str(e)
-        }), 500
+            'error': 'Data not yet available',
+            'message': 'Server is fetching initial data, please retry in a few seconds'
+        }), 503
+    
+    # Return cached data with cache timestamp
+    response_data = games_cache['data'].copy()
+    response_data['cached_at'] = games_cache['last_updated'].isoformat() if games_cache['last_updated'] else None
+    response_data['is_live_cache'] = True
+    
+    return jsonify(response_data), 200
 
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """
-    GET /api/health
+    GET /api/health (Public)
     
-    Health check endpoint to verify API and dependencies are working.
+    Health check endpoint - does not require authentication.
     """
-    try:
-        # Check SofaScore API
-        score_provider.check_health()
-        
-        return jsonify({
-            'status': 'healthy',
-            'sofascore': 'connected',
-            'polymarket': 'connected'
-        }), 200
-    except Exception as e:
-        return jsonify({
-            'status': 'unhealthy',
-            'error': str(e)
-        }), 503
+    cache_age = None
+    if games_cache['last_updated']:
+        cache_age = (datetime.now(timezone.utc) - games_cache['last_updated']).total_seconds()
+    
+    return jsonify({
+        'status': 'healthy',
+        'cache_status': 'populated' if games_cache['data'] else 'empty',
+        'cache_age_seconds': cache_age,
+        'is_fetching': games_cache['is_fetching']
+    }), 200
 
 
 @app.route('/')
 def index():
-    """Serve the web interface"""
+    """Serve the login page (public) or redirect authenticated users"""
+    return send_from_directory('static', 'login.html')
+
+
+@app.route('/app')
+def app_page():
+    """Serve the main app interface (requires valid token in localStorage)"""
     return send_from_directory('static', 'index.html')
 
 
-@app.route('/<path:path>')
+@app.route('/static/<path:path>')
 def serve_static(path):
     """Serve static files"""
     return send_from_directory('static', path)

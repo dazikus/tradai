@@ -1,11 +1,48 @@
 // Live Sports Betting Tracker - Frontend Application
 
-const API_BASE_URL = 'http://localhost:5001/api';
-const REFRESH_INTERVAL = 60000; // 60 seconds
+const API_BASE_URL = window.location.origin + '/api';
+const MIN_REFRESH_INTERVAL = 30000; // 30 seconds
+const MAX_REFRESH_INTERVAL = 60000; // 60 seconds
 
 let refreshTimer = null;
 let charts = {};
 let isInitialLoad = true;
+let authToken = null;
+
+// Authentication check
+function checkAuth() {
+    authToken = localStorage.getItem('auth_token');
+    if (!authToken) {
+        window.location.href = '/';
+        return false;
+    }
+    return true;
+}
+
+// Logout function
+function logout() {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('username');
+    window.location.href = '/';
+}
+
+// Fetch with auth header
+async function authenticatedFetch(url, options = {}) {
+    const headers = {
+        ...options.headers,
+        'Authorization': `Bearer ${authToken}`
+    };
+    
+    const response = await fetch(url, { ...options, headers });
+    
+    // Handle 401 unauthorized - token expired
+    if (response.status === 401) {
+        logout();
+        throw new Error('Session expired');
+    }
+    
+    return response;
+}
 
 // Event type icons mapping
 const EVENT_ICONS = {
@@ -31,14 +68,43 @@ const EVENT_ICONS = {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    if (!checkAuth()) return;
+    
+    // Add logout button to header
+    addLogoutButton();
+    
     loadGames();
     startAutoRefresh();
 });
 
-// Start auto-refresh
+// Add logout button to header
+function addLogoutButton() {
+    const headerStats = document.querySelector('.header-stats');
+    const logoutBtn = document.createElement('button');
+    logoutBtn.className = 'refresh-button';
+    logoutBtn.title = 'Logout';
+    logoutBtn.onclick = logout;
+    logoutBtn.innerHTML = '<i data-lucide="log-out" class="refresh-icon"></i>';
+    headerStats.appendChild(logoutBtn);
+    
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+}
+
+// Start auto-refresh with random interval
 function startAutoRefresh() {
     if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = setInterval(loadGames, REFRESH_INTERVAL);
+    
+    const randomInterval = Math.floor(
+        Math.random() * (MAX_REFRESH_INTERVAL - MIN_REFRESH_INTERVAL + 1) + MIN_REFRESH_INTERVAL
+    );
+    
+    console.log(`Next auto-refresh in ${randomInterval / 1000} seconds`);
+    refreshTimer = setTimeout(() => {
+        loadGames();
+        startAutoRefresh(); // Schedule next refresh
+    }, randomInterval);
 }
 
 // Manual refresh triggered by user
@@ -73,7 +139,7 @@ async function loadGames() {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/live-games`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/live-games`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);

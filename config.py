@@ -33,4 +33,16 @@ class Config:
     FLASK_HOST = '0.0.0.0'
     FLASK_PORT = int(os.environ.get('PORT', 5001))  # Render sets PORT env var
     FLASK_DEBUG = False
+    
+    # Authentication
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
+    JWT_EXPIRY_DAYS = 7  # Token valid for 7 days
+    
+    # Credentials (in production, use environment variables and proper hashing)
+    ADMIN_USERNAME = 'admin'
+    ADMIN_PASSWORD = 'admin'  # TODO: Hash this in production
+    
+    # Data refresh settings
+    MIN_REFRESH_INTERVAL = 30  # seconds
+    MAX_REFRESH_INTERVAL = 60  # seconds
 
