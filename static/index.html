@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Sports Betting Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">⚡</span>
+                    <span class="logo-text">Live Sports Betting</span>
+                </div>
+                <div class="header-stats">
+                    <div class="stat-item">
+                        <span class="stat-value" id="totalGames">-</span>
+                        <span class="stat-label">Live Games</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="lastUpdate">-</span>
+                        <span class="stat-label">Last Update</span>
+                    </div>
+                    <button id="manualRefresh" class="refresh-button" onclick="manualRefresh()" title="Refresh now">
+                        <i data-lucide="refresh-cw" class="refresh-icon"></i>
+                    </button>
+                    <div id="refreshIndicator" class="refresh-indicator" style="display: none;">
+                        <div class="refresh-spinner"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div class="container">
+            <!-- Loading State -->
+            <div id="loading" class="loading">
+                <div class="loader"></div>
+                <p>Loading live games...</p>
+            </div>
+
+            <!-- Error State -->
+            <div id="error" class="error" style="display: none;">
+                <span class="error-icon">⚠️</span>
+                <h3>Failed to load games</h3>
+                <p id="errorMessage"></p>
+                <button onclick="loadGames()" class="btn-primary">Retry</button>
+            </div>
+
+            <!-- Games Container -->
+            <div id="gamesContainer" class="games-container"></div>
+
+            <!-- No Games State -->
+            <div id="noGames" class="no-games" style="display: none;">
+                <span class="no-games-icon">🏆</span>
+                <h3>No Live Games</h3>
+                <p>Check back during game times to see live matches</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>Data from <strong>Diz</strong> & <strong>Nuts</strong></p>
+            <p>Auto-refreshing every 60 seconds</p>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+    </script>
+</body>
+</html>
+
