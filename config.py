@@ -1,6 +1,7 @@
 """
 Application configuration
 """
+import os
 
 
 class Config:
@@ -30,6 +31,6 @@ class Config:
     
     # Flask config
     FLASK_HOST = '0.0.0.0'
-    FLASK_PORT = 5001
+    FLASK_PORT = int(os.environ.get('PORT', 5001))  # Render sets PORT env var
     FLASK_DEBUG = False
 
