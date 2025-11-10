@@ -5,6 +5,7 @@ SofaScore API provider for live game data
 import requests
 import re
 import time
+import random
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timezone
 
@@ -25,28 +26,76 @@ class SofaScoreProvider:
     - Match status (1st half, 2nd half, halftime, etc.)
     - Fuzzy team name matching
     - In-memory caching (30 seconds) to minimize API calls
+    - Anti-blocking measures: user agent rotation, session cookies, enhanced headers
     """
     
     BASE_URL = "https://www.sofascore.com/api/v1"
+    WEBSITE_URL = "https://www.sofascore.com"
     CACHE_SECONDS = 30
+    
+    # Rotating user agents to avoid detection
+    USER_AGENTS = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    ]
     
     def __init__(self):
         self.session = requests.Session()
+        self._initialize_session()
+        self._cache: Dict[str, Tuple[LiveGameData, datetime]] = {}
+        self._all_matches_cache: Optional[Tuple[List[Dict], datetime]] = None
+        self._session_initialized = False
+    
+    def _initialize_session(self):
+        """Initialize session with realistic browser headers and cookies"""
+        # Rotate user agent
+        user_agent = random.choice(self.USER_AGENTS)
+        
+        # Enhanced headers to mimic real browser
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': user_agent,
             'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8,es;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
-            'Origin': 'https://www.sofascore.com',
-            'Referer': 'https://www.sofascore.com/',
+            'Origin': self.WEBSITE_URL,
+            'Referer': f'{self.WEBSITE_URL}/',
             'DNT': '1',
             'Connection': 'keep-alive',
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin'
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
         })
-        self._cache: Dict[str, Tuple[LiveGameData, datetime]] = {}
-        self._all_matches_cache: Optional[Tuple[List[Dict], datetime]] = None
+    
+    def _warmup_session(self):
+        """Visit homepage first to get cookies and establish session"""
+        if self._session_initialized:
+            return
+        
+        try:
+            # First, visit the homepage to get cookies
+            response = self.session.get(
+                self.WEBSITE_URL,
+                timeout=10,
+                allow_redirects=True
+            )
+            
+            if response.status_code == 200:
+                self._session_initialized = True
+                log("[DEBUG] SofaScore session initialized with cookies")
+                # Small delay to appear more human-like
+                time.sleep(0.5)
+        except Exception as e:
+            log(f"[WARNING] Failed to warmup SofaScore session: {e}")
+            # Continue anyway - might still work
     
     def check_health(self) -> bool:
         """Check if SofaScore API is accessible and working"""
@@ -183,40 +232,70 @@ class SofaScoreProvider:
             if age < self.CACHE_SECONDS:
                 return matches
         
-        try:
-            response = self.session.get(
-                f"{self.BASE_URL}/sport/football/events/live",
-                timeout=5
-            )
-            
-            if response.status_code == 403:
-                # SofaScore is blocking this IP (e.g., Vercel serverless)
-                log(f"[WARNING] SofaScore API returned 403 Forbidden - IP may be blocked")
-                return []  # Return empty list instead of crashing
-            
-            if response.status_code != 200:
-                raise Exception(f"SofaScore API returned status {response.status_code}")
-            
-            data = response.json()
-            matches = data.get('events', [])
-            
-            log(f"[DEBUG] SofaScore API: Fetched {len(matches)} live matches")
-            
-            # Log ALL SofaScore games for debugging
-            for i, match in enumerate(matches, 1):
-                api_home = match.get('homeTeam', {}).get('name', 'N/A')
-                api_away = match.get('awayTeam', {}).get('name', 'N/A')
-                status_desc = match.get('status', {}).get('description', 'N/A')
-                event_id = match.get('id', 'N/A')
-                log(f"[DEBUG]   {i}. SofaScore Event ID {event_id}: '{api_home}' vs '{api_away}' ({status_desc})")
-            
-            self._all_matches_cache = (matches, datetime.now(timezone.utc))
-            return matches
+        # Warmup session first (get cookies)
+        self._warmup_session()
         
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"Failed to fetch live matches from SofaScore: {str(e)}")
-        except ValueError as e:
-            raise Exception(f"SofaScore returned invalid JSON: {str(e)}")
+        # Retry logic with exponential backoff
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Rotate user agent on retry
+                if attempt > 0:
+                    self._initialize_session()
+                    time.sleep(1 * attempt)  # Exponential backoff
+                
+                response = self.session.get(
+                    f"{self.BASE_URL}/sport/football/events/live",
+                    timeout=10,
+                    allow_redirects=True
+                )
+                
+                if response.status_code == 403:
+                    if attempt < max_retries - 1:
+                        log(f"[WARNING] SofaScore API returned 403 Forbidden (attempt {attempt + 1}/{max_retries}) - retrying with new session...")
+                        # Reset session and try again
+                        self.session = requests.Session()
+                        self._session_initialized = False
+                        self._initialize_session()
+                        continue
+                    else:
+                        log(f"[WARNING] SofaScore API returned 403 Forbidden after {max_retries} attempts - IP may be blocked")
+                        return []  # Return empty list instead of crashing
+                
+                if response.status_code != 200:
+                    if attempt < max_retries - 1:
+                        log(f"[WARNING] SofaScore API returned status {response.status_code} (attempt {attempt + 1}/{max_retries}) - retrying...")
+                        continue
+                    else:
+                        raise Exception(f"SofaScore API returned status {response.status_code}")
+                
+                data = response.json()
+                matches = data.get('events', [])
+                
+                log(f"[DEBUG] SofaScore API: Fetched {len(matches)} live matches")
+                
+                # Log ALL SofaScore games for debugging
+                for i, match in enumerate(matches, 1):
+                    api_home = match.get('homeTeam', {}).get('name', 'N/A')
+                    api_away = match.get('awayTeam', {}).get('name', 'N/A')
+                    status_desc = match.get('status', {}).get('description', 'N/A')
+                    event_id = match.get('id', 'N/A')
+                    log(f"[DEBUG]   {i}. SofaScore Event ID {event_id}: '{api_home}' vs '{api_away}' ({status_desc})")
+                
+                self._all_matches_cache = (matches, datetime.now(timezone.utc))
+                return matches
+            
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    log(f"[WARNING] Request failed (attempt {attempt + 1}/{max_retries}): {e} - retrying...")
+                    continue
+                else:
+                    raise Exception(f"Failed to fetch live matches from SofaScore: {str(e)}")
+            except ValueError as e:
+                raise Exception(f"SofaScore returned invalid JSON: {str(e)}")
+        
+        # Should not reach here, but just in case
+        return []
     
     def fetch_game_comments(self, event_id: int, limit: int = 10) -> List[GameComment]:
         """Fetch recent game comments/events from SofaScore"""
