@@ -2,123 +2,104 @@
 SofaScore API provider for live game data
 """
 
-import requests
 import re
 import time
-import random
+import json
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timezone
 
 from models import LiveGameData, GameMomentum, GameComment
 from logger import log
 
+# Try to import undetected_chromedriver
+try:
+    import undetected_chromedriver as uc
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+    UNDETECTED_CHROME_AVAILABLE = True
+except ImportError:
+    UNDETECTED_CHROME_AVAILABLE = False
+    log("[WARNING] undetected-chromedriver not installed. Install with: pip install undetected-chromedriver selenium")
+
 
 class SofaScoreProvider:
     """
-    Live scores from SofaScore.com
+    Live scores from SofaScore.com using undetected-chromedriver
     
-    SofaScore provides comprehensive live scores for football/soccer matches.
-    No API key required - publicly accessible endpoint.
+    Uses a real browser (Chrome) in headless mode to bypass bot detection.
+    This approach mimics a real user browsing the website.
     
     Features:
     - Real-time scores
     - Current game minute
     - Match status (1st half, 2nd half, halftime, etc.)
     - Fuzzy team name matching
-    - In-memory caching (30 seconds) to minimize API calls
-    - Anti-blocking measures: user agent rotation, session cookies, enhanced headers
+    - In-memory caching (30 seconds) to minimize browser launches
     """
     
     BASE_URL = "https://www.sofascore.com/api/v1"
     WEBSITE_URL = "https://www.sofascore.com"
     CACHE_SECONDS = 30
     
-    # Rotating user agents to avoid detection
-    USER_AGENTS = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-    ]
-    
     def __init__(self):
-        self.session = requests.Session()
-        self._initialize_session()
+        self.driver = None
         self._cache: Dict[str, Tuple[LiveGameData, datetime]] = {}
         self._all_matches_cache: Optional[Tuple[List[Dict], datetime]] = None
-        self._session_initialized = False
-    
-    def _initialize_session(self):
-        """Initialize session with realistic browser headers and cookies"""
-        # Rotate user agent
-        user_agent = random.choice(self.USER_AGENTS)
         
-        # Enhanced headers to mimic real browser
-        self.session.headers.update({
-            'User-Agent': user_agent,
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8,es;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Origin': self.WEBSITE_URL,
-            'Referer': f'{self.WEBSITE_URL}/',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-        })
+        if not UNDETECTED_CHROME_AVAILABLE:
+            log("[ERROR] undetected-chromedriver is required but not installed")
     
-    def _warmup_session(self):
-        """Visit homepage first to get cookies and establish session"""
-        if self._session_initialized:
-            return
-        
-        try:
-            # First, visit the homepage to get cookies
-            response = self.session.get(
-                self.WEBSITE_URL,
-                timeout=10,
-                allow_redirects=True
-            )
+    def _get_driver(self):
+        """Get or create Chrome driver instance"""
+        if self.driver is None:
+            if not UNDETECTED_CHROME_AVAILABLE:
+                raise Exception("undetected-chromedriver not available")
             
-            if response.status_code == 200:
-                self._session_initialized = True
-                log("[DEBUG] SofaScore session initialized with cookies")
-                # Small delay to appear more human-like
-                time.sleep(0.5)
-        except Exception as e:
-            log(f"[WARNING] Failed to warmup SofaScore session: {e}")
-            # Continue anyway - might still work
+            try:
+                options = uc.ChromeOptions()
+                options.add_argument('--headless=new')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--disable-gpu')
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                options.add_argument('--disable-extensions')
+                options.add_argument('--window-size=1920,1080')
+                options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+                
+                self.driver = uc.Chrome(options=options, version_main=None)
+                log("[DEBUG] Chrome driver initialized")
+            except Exception as e:
+                log(f"[ERROR] Failed to initialize Chrome driver: {e}")
+                raise
+        
+        return self.driver
+    
+    def _close_driver(self):
+        """Close Chrome driver"""
+        if self.driver:
+            try:
+                self.driver.quit()
+            except:
+                pass
+            self.driver = None
+    
+    def cleanup(self):
+        """Cleanup resources - call this when done with the provider"""
+        self._close_driver()
+    
+    def __del__(self):
+        """Cleanup on object destruction"""
+        self.cleanup()
     
     def check_health(self) -> bool:
         """Check if SofaScore API is accessible and working"""
         try:
-            response = self.session.get(
-                f"{self.BASE_URL}/sport/football/events/live",
-                timeout=10
-            )
-            
-            if response.status_code != 200:
-                raise Exception(f"SofaScore API returned status {response.status_code}")
-            
-            data = response.json()
-            
-            if 'events' not in data:
-                raise Exception("SofaScore API response missing 'events' field")
-            
-            return True
-            
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"SofaScore API request failed: {str(e)}")
-        except ValueError as e:
-            raise Exception(f"SofaScore API returned invalid JSON: {str(e)}")
+            matches = self._fetch_all_live_matches()
+            return len(matches) >= 0  # Just check if we can fetch
+        except Exception as e:
+            raise Exception(f"SofaScore API check failed: {str(e)}")
     
     def _normalize_team_name(self, team_name: str) -> str:
         """Normalize team name for matching"""
@@ -225,90 +206,54 @@ class SofaScoreProvider:
             return elapsed_minutes if elapsed_minutes >= 0 else None
     
     def _fetch_all_live_matches(self) -> List[Dict]:
-        """Fetch all live football matches from SofaScore (cached)"""
+        """Fetch all live football matches from SofaScore using browser (cached)"""
         if self._all_matches_cache:
             matches, cached_at = self._all_matches_cache
             age = (datetime.now(timezone.utc) - cached_at).total_seconds()
             if age < self.CACHE_SECONDS:
                 return matches
         
-        # Warmup session first (get cookies)
-        self._warmup_session()
+        if not UNDETECTED_CHROME_AVAILABLE:
+            log("[ERROR] undetected-chromedriver not available - cannot fetch SofaScore data")
+            return []
         
-        # Retry logic with exponential backoff
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                # Rotate user agent on retry
-                if attempt > 0:
-                    self._initialize_session()
-                    time.sleep(1 * attempt)  # Exponential backoff
-                
-                response = self.session.get(
-                    f"{self.BASE_URL}/sport/football/events/live",
-                    timeout=10,
-                    allow_redirects=True
-                )
-                
-                if response.status_code == 403:
-                    if attempt < max_retries - 1:
-                        log(f"[WARNING] SofaScore API returned 403 Forbidden (attempt {attempt + 1}/{max_retries}) - retrying with new session...")
-                        # Reset session and try again
-                        self.session = requests.Session()
-                        self._session_initialized = False
-                        self._initialize_session()
-                        continue
-                    else:
-                        log(f"[WARNING] SofaScore API returned 403 Forbidden after {max_retries} attempts - IP may be blocked")
-                        return []  # Return empty list instead of crashing
-                
-                if response.status_code != 200:
-                    if attempt < max_retries - 1:
-                        log(f"[WARNING] SofaScore API returned status {response.status_code} (attempt {attempt + 1}/{max_retries}) - retrying...")
-                        continue
-                    else:
-                        raise Exception(f"SofaScore API returned status {response.status_code}")
-                
-                data = response.json()
-                matches = data.get('events', [])
-                
-                log(f"[DEBUG] SofaScore API: Fetched {len(matches)} live matches")
-                
-                # Log ALL SofaScore games for debugging
-                for i, match in enumerate(matches, 1):
-                    api_home = match.get('homeTeam', {}).get('name', 'N/A')
-                    api_away = match.get('awayTeam', {}).get('name', 'N/A')
-                    status_desc = match.get('status', {}).get('description', 'N/A')
-                    event_id = match.get('id', 'N/A')
-                    log(f"[DEBUG]   {i}. SofaScore Event ID {event_id}: '{api_home}' vs '{api_away}' ({status_desc})")
-                
-                self._all_matches_cache = (matches, datetime.now(timezone.utc))
-                return matches
-            
-            except requests.exceptions.RequestException as e:
-                if attempt < max_retries - 1:
-                    log(f"[WARNING] Request failed (attempt {attempt + 1}/{max_retries}): {e} - retrying...")
-                    continue
-                else:
-                    raise Exception(f"Failed to fetch live matches from SofaScore: {str(e)}")
-            except ValueError as e:
-                raise Exception(f"SofaScore returned invalid JSON: {str(e)}")
-        
-        # Should not reach here, but just in case
-        return []
-    
-    def fetch_game_comments(self, event_id: int, limit: int = 10) -> List[GameComment]:
-        """Fetch recent game comments/events from SofaScore"""
         try:
-            response = self.session.get(
-                f"{self.BASE_URL}/event/{event_id}/comments",
-                timeout=3
-            )
+            api_url = f"{self.BASE_URL}/sport/football/events/live"
+            log(f"[DEBUG] Fetching SofaScore data from: {api_url}")
             
-            if response.status_code != 200:
+            data = self._fetch_json_via_browser(api_url)
+            if not data:
                 return []
             
-            data = response.json()
+            matches = data.get('events', [])
+            
+            log(f"[DEBUG] SofaScore API: Fetched {len(matches)} live matches")
+            
+            # Log ALL SofaScore games for debugging
+            for i, match in enumerate(matches, 1):
+                api_home = match.get('homeTeam', {}).get('name', 'N/A')
+                api_away = match.get('awayTeam', {}).get('name', 'N/A')
+                status_desc = match.get('status', {}).get('description', 'N/A')
+                event_id = match.get('id', 'N/A')
+                log(f"[DEBUG]   {i}. SofaScore Event ID {event_id}: '{api_home}' vs '{api_away}' ({status_desc})")
+            
+            self._all_matches_cache = (matches, datetime.now(timezone.utc))
+            return matches
+                
+        except Exception as e:
+            log(f"[ERROR] Failed to fetch live matches from SofaScore: {e}")
+            return []
+    
+    def fetch_game_comments(self, event_id: int, limit: int = 10) -> List[GameComment]:
+        """Fetch recent game comments/events from SofaScore using browser"""
+        if not UNDETECTED_CHROME_AVAILABLE:
+            return []
+        
+        try:
+            data = self._fetch_json_via_browser(f"{self.BASE_URL}/event/{event_id}/comments")
+            if not data:
+                return []
+            
             comments_data = data.get('comments', [])
             
             comments = []
@@ -316,7 +261,7 @@ class SofaScoreProvider:
                 text = comment_data.get('text', '')
                 event_type = comment_data.get('type', 'unknown')
                 is_home = comment_data.get('isHome', False)
-                time = comment_data.get('time', 0)
+                time_val = comment_data.get('time', 0)
                 
                 player_name = None
                 player_data = comment_data.get('player')
@@ -327,31 +272,49 @@ class SofaScoreProvider:
                     text=text,
                     event_type=event_type,
                     is_home=is_home,
-                    time=time,
+                    time=time_val,
                     player_name=player_name
                 ))
             
             return comments
             
-        except Exception:
+        except Exception as e:
+            log(f"[WARNING] Failed to fetch comments for event {event_id}: {e}")
             return []
+    
+    def _fetch_json_via_browser(self, url: str) -> Optional[Dict]:
+        """Helper method to fetch JSON via browser"""
+        if not UNDETECTED_CHROME_AVAILABLE:
+            return None
+        
+        try:
+            driver = self._get_driver()
+            driver.get(url)
+            time.sleep(1)
+            
+            page_source = driver.page_source
+            if page_source.strip().startswith('<'):
+                import re
+                json_match = re.search(r'\{.*\}', page_source, re.DOTALL)
+                if json_match:
+                    page_source = json_match.group(0)
+            
+            return json.loads(page_source)
+        except Exception as e:
+            log(f"[WARNING] Failed to fetch JSON from {url}: {e}")
+            return None
     
     def fetch_game_momentum(self, event_id: int) -> Optional[GameMomentum]:
         """
-        Fetch game momentum and statistics from SofaScore.
+        Fetch game momentum and statistics from SofaScore using browser.
         Combines data from /graph, /statistics, and /comments endpoints.
         """
         momentum = GameMomentum(event_id=event_id)
         
         # Fetch momentum graph data
         try:
-            graph_response = self.session.get(
-                f"{self.BASE_URL}/event/{event_id}/graph",
-                timeout=3
-            )
-            
-            if graph_response.status_code == 200:
-                graph_data = graph_response.json()
+            graph_data = self._fetch_json_via_browser(f"{self.BASE_URL}/event/{event_id}/graph")
+            if graph_data:
                 graph_points = graph_data.get('graphPoints', [])
                 
                 if graph_points:
@@ -380,13 +343,8 @@ class SofaScoreProvider:
         
         # Fetch statistics data
         try:
-            stats_response = self.session.get(
-                f"{self.BASE_URL}/event/{event_id}/statistics",
-                timeout=3
-            )
-            
-            if stats_response.status_code == 200:
-                stats_data = stats_response.json()
+            stats_data = self._fetch_json_via_browser(f"{self.BASE_URL}/event/{event_id}/statistics")
+            if stats_data:
                 statistics = stats_data.get('statistics', [])
                 
                 for period_stats in statistics:
