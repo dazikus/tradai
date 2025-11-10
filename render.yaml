@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tradai
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: SECRET_KEY
+        generateValue: true
+      - key: POLYMARKET_PRIVATE_KEY
+        sync: false  # Set this in Render dashboard
+    healthCheckPath: /api/health
+    autoDeploy: true
+
