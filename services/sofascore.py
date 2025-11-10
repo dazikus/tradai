@@ -73,41 +73,67 @@ class SofaScoreProvider:
     def _normalize_team_name(self, team_name: str) -> str:
         """Normalize team name for matching"""
         name = team_name.lower()
+        # Replace hyphens and apostrophes with spaces
         name = name.replace('-', ' ').replace("'", ' ')
+        # Remove year suffixes
         name = re.sub(r"'\d+", '', name)
         name = re.sub(r'\b\d{4}\b', '', name)
         
-        for term in [' fc', ' f.c.', ' united', ' city', ' sporting', ' club', ' cf', ' sc', ' saudi']:
+        # Remove common suffixes (order matters - longer first)
+        suffixes = [
+            ' saudi club', ' saudi', ' fc', ' f.c.', ' f c', 
+            ' united', ' city', ' sporting', ' club', ' cf', ' sc', 
+            ' ac', ' athletic', ' athletic club', ' de fútbol',
+            ' y esgrima', ' esgrima'  # Handle "Gimnasia y Esgrima"
+        ]
+        for term in suffixes:
             name = name.replace(term, '')
         
+        # Clean up multiple spaces
         name = ' '.join(name.split())
         return name.strip()
     
-    def _teams_match(self, team1: str, team2: str) -> bool:
+    def _teams_match(self, team1: str, team2: str, debug: bool = False) -> bool:
         """Check if two team names match using fuzzy matching"""
         normalized1 = self._normalize_team_name(team1)
         normalized2 = self._normalize_team_name(team2)
         
+        if debug:
+            print(f"    [MATCH] Comparing: '{team1}' -> '{normalized1}' vs '{team2}' -> '{normalized2}'")
+        
         if normalized1 == normalized2:
+            if debug:
+                print(f"    [MATCH] ✓ Exact match!")
             return True
         
         if normalized1 in normalized2 or normalized2 in normalized1:
+            if debug:
+                print(f"    [MATCH] ✓ Substring match!")
             return True
         
         words1 = set(normalized1.split())
         words2 = set(normalized2.split())
         
-        common_stopwords = {'de', 'la', 'el', 'cf', 'sc', 'ac', 'as', 'the'}
+        common_stopwords = {'de', 'la', 'el', 'cf', 'sc', 'ac', 'as', 'the', 'y', 'vs'}
         words1 -= common_stopwords
         words2 -= common_stopwords
         
         if not words1 or not words2:
+            if debug:
+                print(f"    [MATCH] ✗ No words after stopword removal")
             return False
         
         common_words = words1 & words2
         overlap_ratio = len(common_words) / min(len(words1), len(words2))
         
-        return overlap_ratio >= 0.7
+        if debug:
+            print(f"    [MATCH] Words1: {words1}, Words2: {words2}, Common: {common_words}, Ratio: {overlap_ratio:.2f}")
+        
+        result = overlap_ratio >= 0.7
+        if debug:
+            print(f"    [MATCH] {'✓ Match!' if result else '✗ No match'}")
+        
+        return result
     
     def _calculate_game_minute(self, time_data: Dict, status_description: str) -> Optional[int]:
         """Calculate current game minute based on period start timestamp"""
@@ -352,15 +378,21 @@ class SofaScoreProvider:
         
         live_matches = self._fetch_all_live_matches()
         
+        # Debug: Show what we're looking for
+        print(f"[DEBUG] Looking for: '{home_team}' vs '{away_team}'")
+        
         # Debug: Show available SofaScore games if no match found
         matched = False
         for match in live_matches:
             api_home = match.get('homeTeam', {}).get('name', '')
             api_away = match.get('awayTeam', {}).get('name', '')
             
-            if (self._teams_match(home_team, api_home) and 
-                self._teams_match(away_team, api_away)):
-                
+            # Debug matching for this specific game
+            home_match = self._teams_match(home_team, api_home, debug=True)
+            away_match = self._teams_match(away_team, api_away, debug=True)
+            
+            if home_match and away_match:
+                print(f"[DEBUG] ✓ MATCH FOUND: '{api_home}' vs '{api_away}'")
                 matched = True
                 event_id = match.get('id')
                 if not event_id:
@@ -395,16 +427,14 @@ class SofaScoreProvider:
                 
                 return game_data
         
-        # No match found - show available SofaScore games for debugging
+        # No match found - show ALL available SofaScore games for debugging
         if not matched and live_matches:
             print(f"[DEBUG] Available SofaScore games ({len(live_matches)} total):")
-            for i, match in enumerate(live_matches[:10]):  # Show first 10
+            for i, match in enumerate(live_matches):  # Show ALL games
                 api_home = match.get('homeTeam', {}).get('name', '')
                 api_away = match.get('awayTeam', {}).get('name', '')
                 status_desc = match.get('status', {}).get('description', '')
                 print(f"  {i+1}. {api_home} vs {api_away} ({status_desc})")
-            if len(live_matches) > 10:
-                print(f"  ... and {len(live_matches) - 10} more")
         
         return None
 

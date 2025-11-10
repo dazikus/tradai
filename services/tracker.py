@@ -37,9 +37,13 @@ class LiveSportsTracker:
         Returns None if event should be filtered out.
         """
         # Extract team names from title
-        home_team, away_team = sport.extract_teams_from_title(event['title'])
+        event_title = event.get('title', '')
+        print(f"[DEBUG] Polymarket event title: '{event_title}'")
+        home_team, away_team = sport.extract_teams_from_title(event_title)
+        print(f"[DEBUG] Extracted teams: Home='{home_team}', Away='{away_team}'")
         
         if not home_team or not away_team:
+            print(f"[DEBUG] ✗ Failed to extract team names from title")
             return None
         
         # Check SofaScore for live game data
