@@ -7,6 +7,7 @@ import time
 import json
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timezone
+import requests
 
 from models import LiveGameData, GameMomentum, GameComment
 from logger import log
@@ -21,7 +22,7 @@ try:
     UNDETECTED_CHROME_AVAILABLE = True
 except ImportError:
     UNDETECTED_CHROME_AVAILABLE = False
-    log("[WARNING] undetected-chromedriver not installed. Install with: pip install undetected-chromedriver selenium")
+    log("[WARNING] undetected-chromedriver not installed. Will use requests fallback.")
 
 
 class SofaScoreProvider:
@@ -47,9 +48,23 @@ class SofaScoreProvider:
         self.driver = None
         self._cache: Dict[str, Tuple[LiveGameData, datetime]] = {}
         self._all_matches_cache: Optional[Tuple[List[Dict], datetime]] = None
+        self._session = requests.Session()
+        # Enhanced headers for requests fallback (when Chrome is not available)
+        self._session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': 'https://www.sofascore.com/',
+            'Origin': 'https://www.sofascore.com',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+        })
         
         if not UNDETECTED_CHROME_AVAILABLE:
-            log("[ERROR] undetected-chromedriver is required but not installed")
+            log("[INFO] Using requests fallback (Chrome not available - this is normal on Vercel)")
     
     def _get_driver(self):
         """Get or create Chrome driver instance"""
@@ -206,16 +221,12 @@ class SofaScoreProvider:
             return elapsed_minutes if elapsed_minutes >= 0 else None
     
     def _fetch_all_live_matches(self) -> List[Dict]:
-        """Fetch all live football matches from SofaScore using browser (cached)"""
+        """Fetch all live football matches from SofaScore using browser or requests fallback (cached)"""
         if self._all_matches_cache:
             matches, cached_at = self._all_matches_cache
             age = (datetime.now(timezone.utc) - cached_at).total_seconds()
             if age < self.CACHE_SECONDS:
                 return matches
-        
-        if not UNDETECTED_CHROME_AVAILABLE:
-            log("[ERROR] undetected-chromedriver not available - cannot fetch SofaScore data")
-            return []
         
         try:
             api_url = f"{self.BASE_URL}/sport/football/events/live"
@@ -245,9 +256,7 @@ class SofaScoreProvider:
             return []
     
     def fetch_game_comments(self, event_id: int, limit: int = 10) -> List[GameComment]:
-        """Fetch recent game comments/events from SofaScore using browser"""
-        if not UNDETECTED_CHROME_AVAILABLE:
-            return []
+        """Fetch recent game comments/events from SofaScore using browser or requests fallback"""
         
         try:
             data = self._fetch_json_via_browser(f"{self.BASE_URL}/event/{event_id}/comments")
@@ -283,25 +292,34 @@ class SofaScoreProvider:
             return []
     
     def _fetch_json_via_browser(self, url: str) -> Optional[Dict]:
-        """Helper method to fetch JSON via browser"""
-        if not UNDETECTED_CHROME_AVAILABLE:
-            return None
+        """Helper method to fetch JSON via browser (Chrome) or requests fallback"""
+        # Try Chrome first if available
+        if UNDETECTED_CHROME_AVAILABLE:
+            try:
+                driver = self._get_driver()
+                driver.get(url)
+                time.sleep(1)
+                
+                page_source = driver.page_source
+                if page_source.strip().startswith('<'):
+                    json_match = re.search(r'\{.*\}', page_source, re.DOTALL)
+                    if json_match:
+                        page_source = json_match.group(0)
+                
+                return json.loads(page_source)
+            except Exception as e:
+                log(f"[WARNING] Chrome fetch failed for {url}: {e}, trying requests fallback")
         
+        # Fallback to requests (for Vercel or when Chrome is not available)
         try:
-            driver = self._get_driver()
-            driver.get(url)
-            time.sleep(1)
-            
-            page_source = driver.page_source
-            if page_source.strip().startswith('<'):
-                import re
-                json_match = re.search(r'\{.*\}', page_source, re.DOTALL)
-                if json_match:
-                    page_source = json_match.group(0)
-            
-            return json.loads(page_source)
-        except Exception as e:
-            log(f"[WARNING] Failed to fetch JSON from {url}: {e}")
+            response = self._session.get(url, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            log(f"[WARNING] Requests fallback failed for {url}: {e}")
+            return None
+        except json.JSONDecodeError as e:
+            log(f"[WARNING] Invalid JSON response from {url}: {e}")
             return None
     
     def fetch_game_momentum(self, event_id: int) -> Optional[GameMomentum]:
