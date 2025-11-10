@@ -27,7 +27,7 @@
   "crons": [
     {
       "path": "/api/refresh",
-      "schedule": "*/45 * * * * *"
+      "schedule": "* * * * *"
     }
   ],
   "env": {
