@@ -1,5 +1,5 @@
 """
-Flask REST API for live sports betting tracker with JWT auth and caching
+Flask REST API for Locked in with JWT auth and caching
 """
 
 from flask import Flask, jsonify, send_from_directory, request
@@ -184,7 +184,7 @@ def serve_static(path):
 
 if __name__ == '__main__':
     print("=" * 80)
-    print("Live Sports Betting Tracker")
+    print("Locked In")
     print("=" * 80)
     print(f"\nStarting server on {Config.FLASK_HOST}:{Config.FLASK_PORT}")
     print(f"\n🌐 Web Interface:")

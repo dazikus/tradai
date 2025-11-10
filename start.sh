@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Start script for Live Sports Betting Tracker API
+# Start script for Locked in API
 # Kills any process on port 5001 and starts the Flask app
 
 PORT=5001

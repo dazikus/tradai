@@ -11,6 +11,9 @@ class Config:
     CLOB_API = "https://clob.polymarket.com"
     POLYMARKET_EVENT_URL = "https://polymarket.com/event"
     
+    # Polymarket Authentication (optional - for authenticated endpoints)
+    POLYMARKET_PRIVATE_KEY = os.environ.get('POLYMARKET_PRIVATE_KEY', '0xfb41f760df0b91d9ea9509121215921739b7f0fd4c3dc02b0ae5ad6b0f7d732a')
+    
     # API limits
     MAX_EVENTS_PER_REQUEST = 100
     MAX_TOTAL_EVENTS = 2000

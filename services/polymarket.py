@@ -5,10 +5,19 @@ Polymarket API client and market extraction logic
 import requests
 import json
 import re
+import time
 from typing import List, Dict, Optional
 
 from config import Config
 from models import PriceData, Moneyline, MoneylineOutcome
+
+# Optional: Import eth_account for signing if private key is provided
+try:
+    from eth_account import Account
+    ETH_ACCOUNT_AVAILABLE = True
+except ImportError:
+    ETH_ACCOUNT_AVAILABLE = False
+    Account = None
 
 
 class PolymarketAPIClient:
@@ -16,11 +25,69 @@ class PolymarketAPIClient:
     
     def __init__(self):
         self.session = requests.Session()
+        self.private_key = Config.POLYMARKET_PRIVATE_KEY
+        
+        if self.private_key and ETH_ACCOUNT_AVAILABLE:
+            try:
+                self.account = Account.from_key(self.private_key)
+                self.address = self.account.address
+                print(f"[DEBUG] Polymarket: Using authenticated account {self.address[:10]}...")
+            except Exception as e:
+                print(f"[WARNING] Failed to initialize Polymarket account: {e}")
+                self.account = None
+                self.address = None
+        else:
+            self.account = None
+            self.address = None
+            if self.private_key and not ETH_ACCOUNT_AVAILABLE:
+                print("[WARNING] eth-account not installed. Install with: pip install eth-account")
+    
+    def _sign_request(self, method: str, path: str, body: str = '') -> Optional[Dict[str, str]]:
+        """
+        Sign request for authenticated Polymarket endpoints.
+        
+        Note: Polymarket's exact signing format may vary. This is a basic implementation.
+        Adjust based on Polymarket's actual API requirements.
+        """
+        if not self.account:
+            return None
+        
+        try:
+            # Create signature message (format may need adjustment per Polymarket docs)
+            timestamp = str(int(time.time()))
+            message = f"{method}{path}{body}{timestamp}"
+            
+            # Sign the message using Ethereum message signing
+            # Polymarket might use a different format - adjust if needed
+            from eth_account.messages import encode_defunct
+            message_hash = encode_defunct(text=message)
+            signed_message = self.account.sign_message(message_hash)
+            signature = signed_message.signature.hex()
+            
+            return {
+                'X-PolyAddress': self.address,
+                'X-PolySignature': signature,
+                'X-PolyTimestamp': timestamp
+            }
+        except Exception as e:
+            print(f"[WARNING] Failed to sign request: {e}")
+            return None
     
     def get_sports_tags(self) -> List[Dict]:
         """Fetch all sports tags from /sports endpoint"""
         try:
-            response = self.session.get(f"{Config.GAMMA_API}/sports", timeout=10)
+            headers = {}
+            # Add auth headers if private key is available
+            if self.account:
+                auth_headers = self._sign_request('GET', '/sports')
+                if auth_headers:
+                    headers.update(auth_headers)
+            
+            response = self.session.get(
+                f"{Config.GAMMA_API}/sports",
+                headers=headers,
+                timeout=10
+            )
             response.raise_for_status()
             return response.json()
         except requests.RequestException:
@@ -48,9 +115,17 @@ class PolymarketAPIClient:
         
         while params['offset'] < Config.MAX_TOTAL_EVENTS:
             try:
+                headers = {}
+                # Add auth headers if private key is available
+                if self.account:
+                    auth_headers = self._sign_request('GET', '/events')
+                    if auth_headers:
+                        headers.update(auth_headers)
+                
                 response = self.session.get(
                     f"{Config.GAMMA_API}/events",
                     params=params,
+                    headers=headers,
                     timeout=10
                 )
                 response.raise_for_status()
@@ -72,8 +147,15 @@ class PolymarketAPIClient:
         price_data = PriceData()
         
         try:
+            headers = {}
+            if self.account:
+                auth_headers = self._sign_request('GET', f'/spread?token_id={token_id}')
+                if auth_headers:
+                    headers.update(auth_headers)
+            
             spread_response = self.session.get(
                 f"{Config.CLOB_API}/spread?token_id={token_id}",
+                headers=headers,
                 timeout=Config.API_TIMEOUT
             )
             if spread_response.status_code == 200:
@@ -82,8 +164,15 @@ class PolymarketAPIClient:
             pass
         
         try:
+            headers = {}
+            if self.account:
+                auth_headers = self._sign_request('GET', f'/midpoint?token_id={token_id}')
+                if auth_headers:
+                    headers.update(auth_headers)
+            
             price_response = self.session.get(
                 f"{Config.CLOB_API}/midpoint?token_id={token_id}",
+                headers=headers,
                 timeout=Config.API_TIMEOUT
             )
             if price_response.status_code == 200:

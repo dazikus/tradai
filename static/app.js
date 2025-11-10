@@ -1,4 +1,4 @@
-// Live Sports Betting Tracker - Frontend Application
+// Locked in - Frontend Application
 
 const API_BASE_URL = window.location.origin + '/api';
 const MIN_REFRESH_INTERVAL = 30000; // 30 seconds
