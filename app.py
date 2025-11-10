@@ -16,13 +16,20 @@ app.config['SECRET_KEY'] = Config.SECRET_KEY
 CORS(app)  # Enable CORS for all routes
 
 # Initialize services
-sports = [
-    SoccerSport(),
-    # NHLSport(),  # Uncomment to add NHL tracking
-]
-
-score_provider = SofaScoreProvider()
-tracker = LiveSportsTracker(sports, score_provider)
+try:
+    sports = [
+        SoccerSport(),
+        # NHLSport(),  # Uncomment to add NHL tracking
+    ]
+    
+    score_provider = SofaScoreProvider()
+    tracker = LiveSportsTracker(sports, score_provider)
+except Exception as e:
+    print(f"[WARNING] Service initialization failed: {e}")
+    # Set to None - will be handled gracefully in routes
+    sports = []
+    score_provider = None
+    tracker = None
 
 # In-memory cache for live games data (works in serverless with short TTL)
 games_cache = {
@@ -39,8 +46,8 @@ def fetch_and_cache_data():
     """Fetch and cache live games data"""
     global games_cache
     
-    if games_cache['is_fetching']:
-        return  # Skip if already fetching
+    if games_cache['is_fetching'] or tracker is None:
+        return  # Skip if already fetching or tracker not initialized
     
     try:
         games_cache['is_fetching'] = True
