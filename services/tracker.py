@@ -46,7 +46,12 @@ class LiveSportsTracker:
         live_data = None
         if self.score_provider:
             try:
+                print(f"[DEBUG] Checking SofaScore for: {home_team} vs {away_team}")
                 live_data = self.score_provider.get_live_game_data(home_team, away_team)
+                if live_data:
+                    print(f"[DEBUG] ✓ Found match in SofaScore: {live_data.home_team} vs {live_data.away_team}")
+                else:
+                    print(f"[DEBUG] ✗ No match found in SofaScore for: {home_team} vs {away_team}")
             except Exception as e:
                 # SofaScore error - log but don't crash
                 # Game might still be shown with Polymarket data only
@@ -129,11 +134,15 @@ class LiveSportsTracker:
             sport_name = sport.get_name()
             live_events = self.get_live_events(sport)
             
+            print(f"[DEBUG] {sport_name}: Found {len(live_events)} live events from Polymarket")
+            
             games = []
             for event in live_events:
                 game_data = self.process_event(event, sport)
                 if game_data:
                     games.append(game_data.to_dict())
+            
+            print(f"[DEBUG] {sport_name}: Matched {len(games)}/{len(live_events)} games with SofaScore")
             
             result['sports'][sport_name] = {
                 'total_found': len(live_events),

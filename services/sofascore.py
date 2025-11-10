@@ -150,6 +150,8 @@ class SofaScoreProvider:
             data = response.json()
             matches = data.get('events', [])
             
+            print(f"[DEBUG] SofaScore API: Fetched {len(matches)} live matches")
+            
             self._all_matches_cache = (matches, datetime.now(timezone.utc))
             return matches
         
@@ -350,6 +352,8 @@ class SofaScoreProvider:
         
         live_matches = self._fetch_all_live_matches()
         
+        # Debug: Show available SofaScore games if no match found
+        matched = False
         for match in live_matches:
             api_home = match.get('homeTeam', {}).get('name', '')
             api_away = match.get('awayTeam', {}).get('name', '')
@@ -357,6 +361,7 @@ class SofaScoreProvider:
             if (self._teams_match(home_team, api_home) and 
                 self._teams_match(away_team, api_away)):
                 
+                matched = True
                 event_id = match.get('id')
                 if not event_id:
                     continue
@@ -389,6 +394,17 @@ class SofaScoreProvider:
                 self._cache[cache_key] = (game_data, datetime.now(timezone.utc))
                 
                 return game_data
+        
+        # No match found - show available SofaScore games for debugging
+        if not matched and live_matches:
+            print(f"[DEBUG] Available SofaScore games ({len(live_matches)} total):")
+            for i, match in enumerate(live_matches[:10]):  # Show first 10
+                api_home = match.get('homeTeam', {}).get('name', '')
+                api_away = match.get('awayTeam', {}).get('name', '')
+                status_desc = match.get('status', {}).get('description', '')
+                print(f"  {i+1}. {api_home} vs {api_away} ({status_desc})")
+            if len(live_matches) > 10:
+                print(f"  ... and {len(live_matches) - 10} more")
         
         return None
 
