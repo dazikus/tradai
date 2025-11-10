@@ -4,6 +4,7 @@ SofaScore API provider for live game data
 
 import requests
 import re
+import time
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timezone
 

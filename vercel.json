@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "app.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/app",
+      "dest": "/app"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/refresh",
+      "schedule": "*/45 * * * * *"
+    }
+  ],
+  "env": {
+    "PYTHON_VERSION": "3.11"
+  }
+}

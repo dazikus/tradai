@@ -4,9 +4,7 @@ Flask REST API for live sports betting tracker with JWT auth and caching
 
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
-from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timezone, timedelta
-import random
 import os
 
 from config import Config
@@ -26,19 +24,19 @@ sports = [
 score_provider = SofaScoreProvider()
 tracker = LiveSportsTracker(sports, score_provider)
 
-# In-memory cache for live games data
+# In-memory cache for live games data (works in serverless with short TTL)
 games_cache = {
     'data': None,
     'last_updated': None,
     'is_fetching': False
 }
 
-# Background scheduler for automatic data refresh
-scheduler = BackgroundScheduler()
+# Cache TTL: refresh every 45 seconds
+CACHE_TTL_SECONDS = 45
 
 
 def fetch_and_cache_data():
-    """Background task to fetch and cache live games data"""
+    """Fetch and cache live games data"""
     global games_cache
     
     if games_cache['is_fetching']:
@@ -59,21 +57,18 @@ def fetch_and_cache_data():
         # Don't crash - just log and continue with empty cache
     finally:
         games_cache['is_fetching'] = False
-        # Schedule next refresh with random interval
-        next_interval = random.randint(Config.MIN_REFRESH_INTERVAL, Config.MAX_REFRESH_INTERVAL)
-        print(f"Next refresh in {next_interval} seconds")
-        next_run_time = datetime.now(timezone.utc) + timedelta(seconds=next_interval)
-        scheduler.add_job(fetch_and_cache_data, 'date', run_date=next_run_time)
 
 
-# Start scheduler and initial fetch
-scheduler.start()
-
-# Initial fetch - non-blocking, errors logged but don't crash the app
-try:
-    fetch_and_cache_data()
-except Exception as e:
-    print(f"[WARNING] Initial data fetch failed (app will retry): {e}")
+def should_refresh_cache() -> bool:
+    """Check if cache should be refreshed"""
+    if games_cache['data'] is None:
+        return True
+    
+    if games_cache['last_updated'] is None:
+        return True
+    
+    age = (datetime.now(timezone.utc) - games_cache['last_updated']).total_seconds()
+    return age >= CACHE_TTL_SECONDS
 
 
 @app.route('/api/login', methods=['POST'])
@@ -102,15 +97,33 @@ def login():
         return jsonify({'error': 'Invalid credentials'}), 401
 
 
+@app.route('/api/refresh', methods=['GET', 'POST'])
+def refresh_cache():
+    """
+    GET/POST /api/refresh (Public - for Vercel Cron)
+    
+    Manually trigger cache refresh. Called by Vercel Cron every 45 seconds.
+    """
+    fetch_and_cache_data()
+    return jsonify({
+        'status': 'refreshed',
+        'games': games_cache['data'].get('total_games', 0) if games_cache['data'] else 0,
+        'timestamp': games_cache['last_updated'].isoformat() if games_cache['last_updated'] else None
+    }), 200
+
+
 @app.route('/api/live-games', methods=['GET'])
 @require_auth
 def get_live_games():
     """
     GET /api/live-games (Protected)
     
-    Returns cached live games data. Server refreshes data automatically 
-    every 30-60 seconds. Users read from cache, not triggering API calls.
+    Returns cached live games data. Refreshes if cache is stale (>45 seconds old).
     """
+    # Refresh cache if stale (on-demand refresh for serverless)
+    if should_refresh_cache():
+        fetch_and_cache_data()
+    
     if games_cache['data'] is None:
         return jsonify({
             'error': 'Data not yet available',
