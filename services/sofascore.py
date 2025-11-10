@@ -80,11 +80,11 @@ class SofaScoreProvider:
         name = re.sub(r'\b\d{4}\b', '', name)
         
         # Remove common suffixes (order matters - longer first)
+        # NOTE: Don't remove "y esgrima" - it's part of team names like "Gimnasia y Esgrima"
         suffixes = [
             ' saudi club', ' saudi', ' fc', ' f.c.', ' f c', 
             ' united', ' city', ' sporting', ' club', ' cf', ' sc', 
-            ' ac', ' athletic', ' athletic club', ' de fútbol',
-            ' y esgrima', ' esgrima'  # Handle "Gimnasia y Esgrima"
+            ' ac', ' athletic', ' athletic club', ' de fútbol'
         ]
         for term in suffixes:
             name = name.replace(term, '')
@@ -378,21 +378,28 @@ class SofaScoreProvider:
         
         live_matches = self._fetch_all_live_matches()
         
-        # Debug: Show what we're looking for
-        print(f"[DEBUG] Looking for: '{home_team}' vs '{away_team}'")
-        
-        # Debug: Show available SofaScore games if no match found
         matched = False
+        potential_matches = []  # Track games that might match for debugging
+        
         for match in live_matches:
             api_home = match.get('homeTeam', {}).get('name', '')
             api_away = match.get('awayTeam', {}).get('name', '')
             
-            # Debug matching for this specific game
-            home_match = self._teams_match(home_team, api_home, debug=True)
-            away_match = self._teams_match(away_team, api_away, debug=True)
+            # Check matches without verbose debug
+            home_match = self._teams_match(home_team, api_home, debug=False)
+            away_match = self._teams_match(away_team, api_away, debug=False)
+            
+            # Track potential partial matches for debugging
+            home_partial = self._teams_match(home_team, api_home, debug=False) or \
+                          (home_team.lower() in api_home.lower() or api_home.lower() in home_team.lower())
+            away_partial = self._teams_match(away_team, api_away, debug=False) or \
+                          (away_team.lower() in api_away.lower() or api_away.lower() in away_team.lower())
+            
+            if home_partial or away_partial:
+                potential_matches.append((api_home, api_away, home_match, away_match))
             
             if home_match and away_match:
-                print(f"[DEBUG] ✓ MATCH FOUND: '{api_home}' vs '{api_away}'")
+                print(f"[DEBUG] ✓ MATCH FOUND: '{home_team}' vs '{away_team}' = '{api_home}' vs '{api_away}'")
                 matched = True
                 event_id = match.get('id')
                 if not event_id:
@@ -427,14 +434,29 @@ class SofaScoreProvider:
                 
                 return game_data
         
-        # No match found - show ALL available SofaScore games for debugging
-        if not matched and live_matches:
-            print(f"[DEBUG] Available SofaScore games ({len(live_matches)} total):")
-            for i, match in enumerate(live_matches):  # Show ALL games
-                api_home = match.get('homeTeam', {}).get('name', '')
-                api_away = match.get('awayTeam', {}).get('name', '')
-                status_desc = match.get('status', {}).get('description', '')
-                print(f"  {i+1}. {api_home} vs {api_away} ({status_desc})")
+        # No match found - show debug info
+        if not matched:
+            print(f"[DEBUG] ✗ No match for: '{home_team}' vs '{away_team}'")
+            if potential_matches:
+                print(f"[DEBUG]   Potential partial matches found:")
+                for api_home, api_away, h_match, a_match in potential_matches[:5]:  # Show top 5
+                    match_status = "✓" if (h_match and a_match) else "~"
+                    print(f"    {match_status} {api_home} vs {api_away} (Home: {'✓' if h_match else '✗'}, Away: {'✓' if a_match else '✗'})")
+            else:
+                # Only show all games if no potential matches at all
+                print(f"[DEBUG]   Checking all {len(live_matches)} SofaScore games...")
+                # Search for specific teams mentioned by user
+                search_terms = ['gimnasia', 'esgrima', 'vélez', 'sarsfield', 'havre', 'nantes', 'stevenage', 'chesterfield']
+                found_relevant = False
+                for match in live_matches:
+                    api_home = match.get('homeTeam', {}).get('name', '').lower()
+                    api_away = match.get('awayTeam', {}).get('name', '').lower()
+                    if any(term in api_home or term in api_away for term in search_terms):
+                        if not found_relevant:
+                            print(f"[DEBUG]   Relevant games found:")
+                            found_relevant = True
+                        status_desc = match.get('status', {}).get('description', '')
+                        print(f"    - {match.get('homeTeam', {}).get('name', '')} vs {match.get('awayTeam', {}).get('name', '')} ({status_desc})")
         
         return None
 
