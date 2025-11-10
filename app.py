@@ -2,35 +2,53 @@
 Flask REST API for Locked in with JWT auth and caching
 """
 
+import sys
+import os
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 from datetime import datetime, timezone, timedelta
-import os
 
 from config import Config
-from services import SoccerSport, NHLSport, SofaScoreProvider, LiveSportsTracker
-from auth import generate_token, require_auth, verify_credentials
 from logger import log
 
-app = Flask(__name__, static_folder='static')
-app.config['SECRET_KEY'] = Config.SECRET_KEY
-CORS(app)  # Enable CORS for all routes
+# Log Python version and environment info at startup
+log("=" * 80)
+log("Application Startup")
+log("=" * 80)
+log(f"Python version: {sys.version}")
+log(f"Python executable: {sys.executable}")
+log(f"Working directory: {os.getcwd()}")
+log(f"PORT env var: {os.environ.get('PORT', 'NOT SET')}")
+log("=" * 80)
 
 # Initialize services
 try:
+    log("[INFO] Initializing services...")
+    from services import SoccerSport, NHLSport, SofaScoreProvider, LiveSportsTracker
+    from auth import generate_token, require_auth, verify_credentials
+    
     sports = [
         SoccerSport(),
         # NHLSport(),  # Uncomment to add NHL tracking
     ]
     
+    log("[INFO] Creating SofaScoreProvider...")
     score_provider = SofaScoreProvider()
+    log("[INFO] Creating LiveSportsTracker...")
     tracker = LiveSportsTracker(sports, score_provider)
+    log("[INFO] Services initialized successfully")
 except Exception as e:
-    log(f"[WARNING] Service initialization failed: {e}")
+    log(f"[ERROR] Service initialization failed: {e}")
+    import traceback
+    log(f"[ERROR] Traceback: {traceback.format_exc()}")
     # Set to None - will be handled gracefully in routes
     sports = []
     score_provider = None
     tracker = None
+
+app = Flask(__name__, static_folder='static')
+app.config['SECRET_KEY'] = Config.SECRET_KEY
+CORS(app)  # Enable CORS for all routes
 
 # In-memory cache for live games data (works in serverless with short TTL)
 games_cache = {
