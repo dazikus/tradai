@@ -92,10 +92,41 @@ class SoccerSport(Sport):
         title = event.get('title', '')
         title_lower = title.lower()
         
+        # First, check if event has markets with 3 outcomes (home, draw, away) - strong indicator of soccer
+        markets = event.get('markets', [])
+        if markets:
+            for market in markets:
+                outcomes = market.get('outcomes', [])
+                if isinstance(outcomes, str):
+                    # Sometimes outcomes is a JSON string
+                    import json
+                    try:
+                        outcomes = json.loads(outcomes)
+                    except:
+                        outcomes = []
+                
+                if isinstance(outcomes, list) and len(outcomes) == 3:
+                    # Check if outcomes look like soccer (home, draw, away)
+                    outcome_names = [outcome.get('name', '').lower() if isinstance(outcome, dict) else str(outcome).lower() for outcome in outcomes]
+                    has_draw = any('draw' in name or 'tie' in name for name in outcome_names)
+                    if has_draw:
+                        # This looks like a soccer market - check if it's excluded
+                        excluded_terms = [
+                            'dota', 'counter-strike', 'valorant', 'league of legends', 'lol:',
+                            'ufc', 'margin of victory', 'larger margin', 'more markets'
+                        ]
+                        is_excluded = any(term in title_lower for term in excluded_terms)
+                        if not is_excluded:
+                            return True
+        
+        # Fall back to title-based filtering (less reliable but catches events without markets yet)
         has_fc = 'fc' in title_lower or 'f.c.' in title_lower
         has_soccer_terms = any(term in title_lower for term in [
             'united', 'city fc', 'athletic', 'sporting', 'real ', 'club ',
-            'wanderers', 'glory', 'mariners', 'victory', 'rovers'
+            'wanderers', 'glory', 'mariners', 'victory', 'rovers',
+            'esgrima', 'sarsfield', 'gimnasia', 'vélez', 'velez',  # South American teams
+            'river plate', 'boca juniors', 'flamengo', 'palmeiras', 'santos',
+            'corinthians', 'fluminense', 'atletico', 'atlético', 'independiente'
         ])
         
         is_soccer = has_fc or has_soccer_terms

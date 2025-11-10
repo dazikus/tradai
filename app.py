@@ -10,6 +10,7 @@ import os
 from config import Config
 from services import SoccerSport, NHLSport, SofaScoreProvider, LiveSportsTracker
 from auth import generate_token, require_auth, verify_credentials
+from logger import log
 
 app = Flask(__name__, static_folder='static')
 app.config['SECRET_KEY'] = Config.SECRET_KEY
@@ -25,7 +26,7 @@ try:
     score_provider = SofaScoreProvider()
     tracker = LiveSportsTracker(sports, score_provider)
 except Exception as e:
-    print(f"[WARNING] Service initialization failed: {e}")
+    log(f"[WARNING] Service initialization failed: {e}")
     # Set to None - will be handled gracefully in routes
     sports = []
     score_provider = None
@@ -51,16 +52,16 @@ def fetch_and_cache_data():
     
     try:
         games_cache['is_fetching'] = True
-        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Fetching live games data...")
+        log(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Fetching live games data...")
         
         data = tracker.get_all_live_games()
         games_cache['data'] = data
         games_cache['last_updated'] = datetime.now(timezone.utc)
         
-        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Cache updated. Games: {data.get('total_games', 0)}")
+        log(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Cache updated. Games: {data.get('total_games', 0)}")
         
     except Exception as e:
-        print(f"[ERROR] Failed to fetch data: {e}")
+        log(f"[ERROR] Failed to fetch data: {e}")
         # Don't crash - just log and continue with empty cache
     finally:
         games_cache['is_fetching'] = False
@@ -183,17 +184,17 @@ def serve_static(path):
 
 
 if __name__ == '__main__':
-    print("=" * 80)
-    print("Locked In")
-    print("=" * 80)
-    print(f"\nStarting server on {Config.FLASK_HOST}:{Config.FLASK_PORT}")
-    print(f"\n🌐 Web Interface:")
-    print(f"  http://localhost:{Config.FLASK_PORT}/")
-    print(f"\n📡 API Endpoints:")
-    print(f"  - GET  http://localhost:{Config.FLASK_PORT}/api/health")
-    print(f"  - GET  http://localhost:{Config.FLASK_PORT}/api/live-games")
-    print(f"\nPress Ctrl+C to stop")
-    print("=" * 80 + "\n")
+    log("=" * 80)
+    log("Locked In")
+    log("=" * 80)
+    log(f"\nStarting server on {Config.FLASK_HOST}:{Config.FLASK_PORT}")
+    log(f"\n🌐 Web Interface:")
+    log(f"  http://localhost:{Config.FLASK_PORT}/")
+    log(f"\n📡 API Endpoints:")
+    log(f"  - GET  http://localhost:{Config.FLASK_PORT}/api/health")
+    log(f"  - GET  http://localhost:{Config.FLASK_PORT}/api/live-games")
+    log(f"\nPress Ctrl+C to stop")
+    log("=" * 80 + "\n")
     
     app.run(
         host=Config.FLASK_HOST,

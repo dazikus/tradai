@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 
 from config import Config
 from models import PriceData, Moneyline, MoneylineOutcome
+from logger import log
 
 # Optional: Import eth_account for signing if private key is provided
 try:
@@ -31,16 +32,16 @@ class PolymarketAPIClient:
             try:
                 self.account = Account.from_key(self.private_key)
                 self.address = self.account.address
-                print(f"[DEBUG] Polymarket: Using authenticated account {self.address[:10]}...")
+                log(f"[DEBUG] Polymarket: Using authenticated account {self.address[:10]}...")
             except Exception as e:
-                print(f"[WARNING] Failed to initialize Polymarket account: {e}")
+                log(f"[WARNING] Failed to initialize Polymarket account: {e}")
                 self.account = None
                 self.address = None
         else:
             self.account = None
             self.address = None
             if self.private_key and not ETH_ACCOUNT_AVAILABLE:
-                print("[WARNING] eth-account not installed. Install with: pip install eth-account")
+                log("[WARNING] eth-account not installed. Install with: pip install eth-account")
     
     def _sign_request(self, method: str, path: str, body: str = '') -> Optional[Dict[str, str]]:
         """
@@ -70,7 +71,7 @@ class PolymarketAPIClient:
                 'X-PolyTimestamp': timestamp
             }
         except Exception as e:
-            print(f"[WARNING] Failed to sign request: {e}")
+            log(f"[WARNING] Failed to sign request: {e}")
             return None
     
     def get_sports_tags(self) -> List[Dict]:
