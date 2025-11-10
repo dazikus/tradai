@@ -57,8 +57,9 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
 # Copy requirements first (for better caching)
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies (including setuptools for distutils compatibility)
+RUN pip install --no-cache-dir --upgrade pip setuptools && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
