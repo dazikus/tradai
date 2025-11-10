@@ -189,6 +189,11 @@ class SofaScoreProvider:
                 timeout=5
             )
             
+            if response.status_code == 403:
+                # SofaScore is blocking this IP (e.g., Vercel serverless)
+                log(f"[WARNING] SofaScore API returned 403 Forbidden - IP may be blocked")
+                return []  # Return empty list instead of crashing
+            
             if response.status_code != 200:
                 raise Exception(f"SofaScore API returned status {response.status_code}")
             

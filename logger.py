@@ -23,12 +23,18 @@ class DualLogger:
         # Write to stdout
         print(log_message, flush=True)
         
-        # Write to file
+        # Write to file (skip if filesystem is read-only, e.g., Vercel)
         try:
             with open(self.log_file, 'a', encoding='utf-8') as f:
                 f.write(log_message + '\n')
+        except (OSError, PermissionError) as e:
+            # Read-only filesystem (e.g., Vercel) - silently skip file writing
+            # Error code 30 is "Read-only file system" on macOS/Linux
+            if e.errno != 30:
+                # Only log if it's not a read-only filesystem error
+                print(f"[ERROR] Failed to write to log file: {e}", file=sys.stderr, flush=True)
         except Exception as e:
-            # If file write fails, at least print the error
+            # Other errors - log them
             print(f"[ERROR] Failed to write to log file: {e}", file=sys.stderr, flush=True)
 
 # Global logger instance
