@@ -60,26 +60,36 @@ class SofaScoreProvider:
     
     def _get_driver(self):
         """Get or create Chrome driver instance"""
-        if self.driver is None:
-            if not UNDETECTED_CHROME_AVAILABLE:
-                raise Exception("undetected-chromedriver not available")
-            
+        # Check if existing driver is still valid
+        if self.driver is not None:
             try:
-                options = uc.ChromeOptions()
-                options.add_argument('--headless=new')
-                options.add_argument('--no-sandbox')
-                options.add_argument('--disable-dev-shm-usage')
-                options.add_argument('--disable-gpu')
-                options.add_argument('--disable-blink-features=AutomationControlled')
-                options.add_argument('--disable-extensions')
-                options.add_argument('--window-size=1920,1080')
-                options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-                
-                self.driver = uc.Chrome(options=options, version_main=None)
-                log("[DEBUG] Chrome driver initialized")
-            except Exception as e:
-                log(f"[ERROR] Failed to initialize Chrome driver: {e}")
-                raise
+                # Test if driver is still alive
+                _ = self.driver.current_url
+                return self.driver
+            except Exception:
+                # Driver is dead, close it and create a new one
+                log("[DEBUG] Chrome driver is invalid, recreating...")
+                self._close_driver()
+        
+        if not UNDETECTED_CHROME_AVAILABLE:
+            raise Exception("undetected-chromedriver not available")
+        
+        try:
+            options = uc.ChromeOptions()
+            options.add_argument('--headless=new')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--disable-extensions')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            
+            self.driver = uc.Chrome(options=options, version_main=None)
+            log("[DEBUG] Chrome driver initialized")
+        except Exception as e:
+            log(f"[ERROR] Failed to initialize Chrome driver: {e}")
+            raise
         
         return self.driver
     
@@ -283,26 +293,47 @@ class SofaScoreProvider:
             log(f"[WARNING] Failed to fetch comments for event {event_id}: {e}")
             return []
     
-    def _fetch_json_via_browser(self, url: str) -> Optional[Dict]:
-        """Helper method to fetch JSON via Chrome browser"""
+    def _fetch_json_via_browser(self, url: str, max_retries: int = 2) -> Optional[Dict]:
+        """Helper method to fetch JSON via Chrome browser with retry logic"""
         if not UNDETECTED_CHROME_AVAILABLE:
             raise RuntimeError("undetected-chromedriver is required but not available")
         
-        try:
-            driver = self._get_driver()
-            driver.get(url)
-            time.sleep(1)
-            
-            page_source = driver.page_source
-            if page_source.strip().startswith('<'):
-                json_match = re.search(r'\{.*\}', page_source, re.DOTALL)
-                if json_match:
-                    page_source = json_match.group(0)
-            
-            return json.loads(page_source)
-        except Exception as e:
-            log(f"[ERROR] Failed to fetch JSON from {url}: {e}")
-            raise
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                driver = self._get_driver()
+                driver.get(url)
+                time.sleep(1)
+                
+                page_source = driver.page_source
+                if page_source.strip().startswith('<'):
+                    json_match = re.search(r'\{.*\}', page_source, re.DOTALL)
+                    if json_match:
+                        page_source = json_match.group(0)
+                
+                return json.loads(page_source)
+            except WebDriverException as e:
+                last_error = e
+                error_msg = str(e)
+                # If it's a window/session error, close driver and retry
+                if "no such window" in error_msg or "web view not found" in error_msg or "Session" in error_msg:
+                    log(f"[WARNING] Chrome driver error on attempt {attempt + 1}/{max_retries}, recreating driver...")
+                    self._close_driver()
+                    if attempt < max_retries - 1:
+                        time.sleep(1)  # Brief pause before retry
+                        continue
+                else:
+                    # Other WebDriver error, don't retry
+                    log(f"[ERROR] Failed to fetch JSON from {url}: {e}")
+                    raise
+            except Exception as e:
+                last_error = e
+                log(f"[ERROR] Failed to fetch JSON from {url}: {e}")
+                raise
+        
+        # All retries exhausted
+        log(f"[ERROR] Failed to fetch JSON from {url} after {max_retries} attempts: {last_error}")
+        raise last_error
     
     def fetch_game_momentum(self, event_id: int) -> Optional[GameMomentum]:
         """
